@@ -130,13 +130,13 @@ int inject_code(pid_t pid, size_t libc_addr, size_t dlopen_addr, char *dso)
 	struct user_regs_struct regs, saved_regs;
 	int status;
 
-	if (ptrace(PTRACE_ATTACH, pid, NULL, NULL) < 0)
+	if (ptrace(PTRACE_ATTACH, pid, NULL, NULL) < 0) // attach to process w/ pid
 		die("ptrace 1");
-	waitpid(pid, &status, 0);
-	if (ptrace(PTRACE_GETREGS, pid, NULL, &regs) < 0)
+	waitpid(pid, &status, 0); // wait for child to recieve SIGSTOP
+	if (ptrace(PTRACE_GETREGS, pid, NULL, &regs) < 0) // put tracee registers in regs
 		die("ptrace 2");
 
-	peek_text(pid, regs.rsp + 1024, sbuf1, sizeof(sbuf1));
+	peek_text(pid, regs.rsp + 1024, sbuf1, sizeof(sbuf1);) //copy [rsp,rsp+2048) into buffers
 	peek_text(pid, regs.rsp, sbuf2, sizeof(sbuf2));
 
 	/* fake saved return address */
@@ -144,7 +144,7 @@ int inject_code(pid_t pid, size_t libc_addr, size_t dlopen_addr, char *dso)
 	poke_text(pid, regs.rsp, (char *)&libc_addr, sizeof(libc_addr));
 	poke_text(pid, regs.rsp + 1024, dso, strlen(dso) + 1); 
 
-	memcpy(&saved_regs, &regs, sizeof(regs));
+	memcpy(&saved_regs, &regs, sizeof(regs)); // save registers
 
 	/* pointer to &args */
 	printf("rdi=%zx rsp=%zx rip=%zx\n", regs.rdi, regs.rsp, regs.rip);
@@ -161,13 +161,13 @@ int inject_code(pid_t pid, size_t libc_addr, size_t dlopen_addr, char *dso)
 	/* Should receive a SIGSEGV */
 	waitpid(pid, &status, 0);
 
-	if (ptrace(PTRACE_SETREGS, pid, 0, &saved_regs) < 0)
+	if (ptrace(PTRACE_SETREGS, pid, 0, &saved_regs) < 0) // restore saved registers
 		die("ptrace 5");
 
-	poke_text(pid, saved_regs.rsp + 1024, sbuf1, sizeof(sbuf1));
+	poke_text(pid, saved_regs.rsp + 1024, sbuf1, sizeof(sbuf1)); // restore saved stack 
 	poke_text(pid, saved_regs.rsp, sbuf2, sizeof(sbuf2));
 
-	if (ptrace(PTRACE_DETACH, pid, NULL, NULL) < 0)
+	if (ptrace(PTRACE_DETACH, pid, NULL, NULL) < 0) // detach from tracee
 		die("ptrace 6");
 
 	return 0;
