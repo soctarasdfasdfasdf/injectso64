@@ -61,7 +61,7 @@ void die(const char *s)
 	exit(errno);
 }
 
-
+// Find address of lib in the context of process with pid
 char *find_libc_start(pid_t pid)
 {
 	char path[1024];
@@ -95,7 +95,7 @@ char *find_libc_start(pid_t pid)
 	return addr1;
 }
 
-
+// copy buf of length blen to addr in memory of process with pid
 int poke_text(pid_t pid, size_t addr, char *buf, size_t blen)
 {
 	int i = 0;
@@ -111,7 +111,7 @@ int poke_text(pid_t pid, size_t addr, char *buf, size_t blen)
 }
 
 
-
+// copy blen words from process with pid's memory, starting at addr,  into buf
 int peek_text(pid_t pid, size_t addr, char *buf, size_t blen)
 {
 	int i = 0;
@@ -123,7 +123,10 @@ int peek_text(pid_t pid, size_t addr, char *buf, size_t blen)
 	return 0;
 }
 
-
+// inject code into process with pid
+// dlopen_addr - address of dlopen function in libc
+// libc_addr - not used? set to zero in function context
+// dso - 
 int inject_code(pid_t pid, size_t libc_addr, size_t dlopen_addr, char *dso)
 {
 	char sbuf1[1024], sbuf2[1024];
@@ -141,25 +144,25 @@ int inject_code(pid_t pid, size_t libc_addr, size_t dlopen_addr, char *dso)
 
 	/* fake saved return address */
 	libc_addr = 0x0;
-	poke_text(pid, regs.rsp, (char *)&libc_addr, sizeof(libc_addr));
-	poke_text(pid, regs.rsp + 1024, dso, strlen(dso) + 1); 
+	poke_text(pid, regs.rsp, (char *)&libc_addr, sizeof(libc_addr)); // zero out rsp to rsp+1024
+	poke_text(pid, regs.rsp + 1024, dso, strlen(dso) + 1); // copies dso buffer+null term into rsp+1024
 
 	memcpy(&saved_regs, &regs, sizeof(regs)); // save registers
 
 	/* pointer to &args */
 	printf("rdi=%zx rsp=%zx rip=%zx\n", regs.rdi, regs.rsp, regs.rip);
 
-	regs.rdi = regs.rsp + 1024;
-	regs.rsi = RTLD_NOW|RTLD_GLOBAL|RTLD_NODELETE;
+	regs.rdi = regs.rsp + 1024; // first argument to dlopen
+	regs.rsi = RTLD_NOW|RTLD_GLOBAL|RTLD_NODELETE; // second argument to dlopen
 	regs.rip = dlopen_addr + 2;// kernel bug?! always need to add 2!
 
-	if (ptrace(PTRACE_SETREGS, pid, NULL, &regs) < 0)
+	if (ptrace(PTRACE_SETREGS, pid, NULL, &regs) < 0) // sets process pid's registers
 		die("ptrace 3");
-	if (ptrace(PTRACE_CONT, pid, NULL, NULL) < 0)
+	if (ptrace(PTRACE_CONT, pid, NULL, NULL) < 0) // restarts stopped tracee process
 		die("ptrace 4");
 
 	/* Should receive a SIGSEGV */
-	waitpid(pid, &status, 0);
+	waitpid(pid, &status, 0); // tracee segfaults, catch
 
 	if (ptrace(PTRACE_SETREGS, pid, 0, &saved_regs) < 0) // restore saved registers
 		die("ptrace 5");
@@ -174,7 +177,7 @@ int inject_code(pid_t pid, size_t libc_addr, size_t dlopen_addr, char *dso)
 }
 
 
-
+// Prints usage
 void usage(const char *path)
 {
 	printf("Usage: %s <pid> <dso-path>\n", path);
@@ -198,17 +201,17 @@ int main(int argc, char **argv)
 		return 1;
 	}
 
-	setbuffer(stdout, NULL, 0);
+	setbuffer(stdout, NULL, 0); // sets output stream to unbuffered - write when input recieved
 
-	my_libc = find_libc_start(getpid());
+	my_libc = find_libc_start(getpid()); //gets PID of this process
 	
 	printf("Trying to obtain __libc_dlopen_mode() address relative to libc start address.\n");
 	printf("[1] Using my own __libc_dlopen_mode ...\n");
-	dlopen_mode = dlsym(NULL, "__libc_dlopen_mode");
-	if (dlopen_mode)
+	dlopen_mode = dlsym(NULL, "__libc_dlopen_mode"); //gets address of dlopen
+	if (dlopen_mode) // found dlopen address
 		dlopen_offset = dlopen_mode - my_libc;
 		
-	if (dlopen_offset == 0 && 
+	if (dlopen_offset == 0 && // dlsym didn't find dlopen, use nm
 	    (pfd = popen("nm /lib64/libc.so.6|grep __libc_dlopen_mode", "r")) != NULL) {
 		printf("[2] Using nm method ... ");
 		fgets(buf, sizeof(buf), pfd);
@@ -223,9 +226,9 @@ int main(int argc, char **argv)
 	}
 	printf("success!\n");
 
-	dl_open_address = find_libc_start(getpid()) + dlopen_offset;
-	daemon_pid = (pid_t)atoi(argv[1]);
-	daemon_libc = find_libc_start(daemon_pid);
+	dl_open_address = find_libc_start(getpid()) + dlopen_offset; //address of dlopen function
+	daemon_pid = (pid_t)atoi(argv[1]); // pid to inject to?
+	daemon_libc = find_libc_start(daemon_pid); // libc in daemon process
 
 	printf("me: {__libc_dlopen_mode:%p, dlopen_offset:%zx}\n=> daemon: {__libc_dlopen_mode:%p, libc:%p}\n",
 	       dl_open_address, dlopen_offset, daemon_libc + dlopen_offset, daemon_libc);
